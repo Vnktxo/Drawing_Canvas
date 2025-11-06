@@ -1,0 +1,32 @@
+<html><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drawing Canvas</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="toolbar">
+        <button id="brush" class="tool active">Brush</button>
+        <button id="eraser" class="tool">Eraser</button>
+
+        <div class="tool-options">
+            <label for="color-picker">Color :</label>
+            <input type="color" id="color-picker" value="#000000">
+        </div>
+        <div class="tool-options">
+            <label for="stroke-width">Width :</label>
+            <input type="range" id="stroke-width" min="1" max="100" value="5">
+        </div>
+
+        <div class="app-control">
+            <button id="undo-button">Undo</button>
+            <button id="clear-button">Clear Canvas</button>
+        </div>
+    </div>
+
+    <canvas id="drawing-canvas"></canvas>
+    <script src="script.js"></script>
+</body>
+</html>
