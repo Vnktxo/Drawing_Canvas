@@ -1,7 +1,12 @@
 window.addEventListener("load",() => {
+    const socket = io();
+    socket.on('connect', () => {
+        console.log('Connected to server with ID:' + socket.id);
+    });
+    
     const canvas = document.getElementById("drawing-canvas");
     const context = canvas.getContext("2d");
-    
+
     const toolbar = document.querySelector(".toolbar");
     const colorPicker = document.getElementById("color-picker");
     const strokeWidth = document.getElementById("stroke-width");
@@ -20,7 +25,7 @@ window.addEventListener("load",() => {
 
     function saveHistory(){
         history.push(context.getImageData(0, 0, canvas.width, canvas.height));
-        if(history.length > 20){
+        if(history.length > 50){
             history.shift();
         }
     }
@@ -37,18 +42,33 @@ window.addEventListener("load",() => {
         drawing = true;
         context.beginPath();
         context.moveTo(e.offsetX, e.offsetY);
+
+        socket.emit('draw:start', {
+            x: e.offsetX,
+            y: e.offsetY,
+        color: context.strokeStyle,
+        lineWidth: context.lineWidth,
+        tool: currentTool,
+        });
     }
 
     function draw(e){
         if(!drawing) return;
         context.lineTo(e.offsetX, e.offsetY);
         context.stroke();
+
+        socket.emit('draw:move', {
+            x: e.offsetX,
+            y: e.offsetY
+        });
     }
 
     function stopdrawing(){
         if(!drawing) return;
         drawing = false;
         saveHistory();
+
+        socket.emit('draw:stop',{});
 }
   
     canvas.addEventListener("mousedown", startdrawing);
@@ -96,6 +116,43 @@ window.addEventListener("load",() => {
             }
         }
     });
+
+    const otherUsers = new Map();
+
+    socket.on('draw:start', (data) => {
+        console.log('Another user started drawing');
+
+        otherUsers.set(data.socketId, data);
+
+        context.beginPath();
+        context.moveTo(data.x, data.y);
+
+        const ogStroke = context.strokeStyle;
+        const ogWidth = context.lineWidth;
+        const ogOps = context.globalCompositeOperation;
+
+        context.strokeStyle= data.color;
+        context.lineWidth = data.lineWidth;
+        context.globalCompositeOperation = (data.tool === 'eraser') ? 'destination-out' : 'source-over';
+
+        context.strokeStyle = ogStroke;
+        context.lineWidth = ogWidth;
+        context.globalCompositeOperation = ogOps;
+    });
+
+    socket.on('daw:move', (data) => {
+        const userData = otherUsers.get(data.socketId);
+        if(!userData) return;
+
+        context.loneTo(data.x, data.y);
+        context.stroke();
+    });
+
+    socket.on('draw:stop', (data) =>{
+        otherUsers.delete(data.socketId);
+        console.log('A user stopped drawing');
+    });
+    
 
     window.addEventListener("resize", () => {
         canvas.width = window.innerWidth;
