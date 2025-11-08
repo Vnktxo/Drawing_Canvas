@@ -2,6 +2,7 @@ window.addEventListener("load",() => {
     const socket = io();
     socket.on('connect', () => {
         console.log('Connected to server with ID:' + socket.id);
+        socket.emit('requestFullCanvas');
     });
     
     const canvas = document.getElementById("drawing-canvas");
@@ -17,39 +18,73 @@ window.addEventListener("load",() => {
 
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight - toolbar.offsetHeight;
-
-    let drawing = false;
-    let currentTool = "brush";
-
-    let history = [];
-
-    function saveHistory(){
-        history.push(context.getImageData(0, 0, canvas.width, canvas.height));
-        if(history.length > 50){
-            history.shift();
-        }
-    }
-
+    
     context.lineCap = "round";
     context.lineJoin = "round";
     context.strokeStyle = colorPicker.value;
     context.lineWidth = strokeWidth.value;
 
-    saveHistory();
 
+    let drawing = false;
+    let currentTool = "brush";
+    let currentPath = [];
+    let history = [];
+
+    socket.on('draw:operation', (op) => {
+        history.push(op);
+        drawOperation(op);
+    });
+
+    const loadHistory = (serverHistory) => {
+        console.log(`Loadig history with ${serverHistory.length} ops`);
+        histoy = serverHistory;
+        redrawCanvas();
+    };
+
+    socket.on('fullCanvas', loadHistory);
+    socket.on('opStore:load', loadHistory);
+
+    /** @param {object} op */
+    
+    function drawOperation(op){
+        if(!op || !op.path || op.path.length < 2) return;
+
+        const ogStroke = context.strokeStyle;
+        const ogWidth = context.lineWidth;
+        const ogOps = context.globalCompositeOperation;
+
+        context.beginPath();
+        context.moveTo(op.path[0].x, op.path[0].y);
+
+        for(let i = 1; i < op.path.length - 2; i++){
+            const p0 = op.path[i];
+            const p1 = op.path[i + 1];
+            const midX = (p0.x + p1.x) / 2;
+            const midY = (p0.y + p1.y) / 2;
+            context.quadraticCurveTo(p0.x, p0.y, midX, midY);
+        }
+        const last = op.path[op.path.length - 1];
+        context.lineTo(last.x, last.y);
+        context.stroke();
+
+        context.strokeStyle = ogStroke;
+        context.lineWidth = ogWidth;
+        context.globalCompositeOperation = ogOps;
+    }
+
+    function redrawCanvas(){
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        for(const op of history){
+            drawOperation(op);
+        }
+    }
 
     function startdrawing(e){
         drawing = true;
         context.beginPath();
         context.moveTo(e.offsetX, e.offsetY);
 
-        socket.emit('draw:start', {
-            x: e.offsetX,
-            y: e.offsetY,
-        color: context.strokeStyle,
-        lineWidth: context.lineWidth,
-        tool: currentTool,
-        });
+        currentPath = [{x : offsetX, y : offsetY}];
     }
 
     function draw(e){
@@ -57,18 +92,23 @@ window.addEventListener("load",() => {
         context.lineTo(e.offsetX, e.offsetY);
         context.stroke();
 
-        socket.emit('draw:move', {
-            x: e.offsetX,
-            y: e.offsetY
-        });
+        currentPath.push({x : offsetX, y : offsetY});
     }
 
     function stopdrawing(){
         if(!drawing) return;
         drawing = false;
-        saveHistory();
 
-        socket.emit('draw:stop',{});
+        if(currentPath.length > 1){
+            socket.emit('draw:operation',{
+                color: context.strokeStyle,
+                lineWidth: context.lineWidth,
+                tool: currentTool,
+                path: currentPath
+            });
+        }
+
+        currentPath = [];
 }
   
     canvas.addEventListener("mousedown", startdrawing);
@@ -99,67 +139,19 @@ window.addEventListener("load",() => {
     });
 
     clearButton.addEventListener("click", () => {
-        context.clearRect(0, 0, canvas.width, canvas.height);
-        history = [];
-        saveHistory();
+        socket.emit('opStore:clear');
     });
 
     undoButton.addEventListener("click", () => {
-        if(history.length > 1){
-            history.pop();
-            const lastState = history[history.length - 1];
-            if(lastState){
-                context.putImageData(lastState, 0, 0);
-            }
-            else{
-                context.clearRect(0, 0, canvas.width, canvas.height);
-            }
-        }
+        console.log('Requesting server to undo');
+        socket.emit('opStore:undo');
     });
-
-    const otherUsers = new Map();
-
-    socket.on('draw:start', (data) => {
-        console.log('Another user started drawing');
-
-        otherUsers.set(data.socketId, data);
-
-        context.beginPath();
-        context.moveTo(data.x, data.y);
-
-        const ogStroke = context.strokeStyle;
-        const ogWidth = context.lineWidth;
-        const ogOps = context.globalCompositeOperation;
-
-        context.strokeStyle= data.color;
-        context.lineWidth = data.lineWidth;
-        context.globalCompositeOperation = (data.tool === 'eraser') ? 'destination-out' : 'source-over';
-
-        context.strokeStyle = ogStroke;
-        context.lineWidth = ogWidth;
-        context.globalCompositeOperation = ogOps;
-    });
-
-    socket.on('daw:move', (data) => {
-        const userData = otherUsers.get(data.socketId);
-        if(!userData) return;
-
-        context.loneTo(data.x, data.y);
-        context.stroke();
-    });
-
-    socket.on('draw:stop', (data) =>{
-        otherUsers.delete(data.socketId);
-        console.log('A user stopped drawing');
-    });
-    
 
     window.addEventListener("resize", () => {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight - toolbar.offsetHeight;
 
-        history = [];
-        saveHistory();
+        redrawCanvas();
 
         context.lineCap = "round";
         context.lineJoin = "round";

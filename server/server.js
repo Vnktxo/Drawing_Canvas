@@ -11,19 +11,32 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, '../client')));
 
+const opStore = [];
+
 io.on('connection', (socket) => {
     console.log(`A user connected : ${socket.id}`);
 
-    socket.on('draw:start', (data) => {
-        socket.broadcast.emit('draw:start', data);
+    socket.on('requestFullCanvas', () => {
+        socket.emit('fullCanvas', opStore);
     });
 
-    socket.on('draw:move', (data) => {
-        socket.broadcast.emit('draw:move', data);
+    socket.on('draw:operation', (op) => {
+        op.timestamp = Date.now();
+        opStore.push(op);
+        io.emit('draw:operation', op);
     });
 
-    socket.on('draw:stop', (data) => {
-        socket.broadcast.emit('draw:stop', data);
+    socket.on('opStore:undo', () => {
+        if(opStore.length > 0){
+            opStore.pop();
+            io.emit('opStore:load', opStore);
+        }
+    });
+
+    socket.on('opStore:clear', () => {
+        
+        opStore.length = 0;
+        io.emit('opStore:load', opStore);
     });
 
     socket.on('disconnect', () => {
