@@ -33,14 +33,19 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('opStore:clear', () => {
-        
+    socket.on('opStore:clear', () => { 
         opStore.length = 0;
         io.emit('opStore:load', opStore);
     });
-
+    
+    socket.on('cursor:move', (data) => {
+        socket.broadcast.emit('cusor:move',{
+            socketId: socket.id
+        });
+    });
     socket.on('disconnect', () => {
         console.log(`User disconnected : ${socket.id}`);
+        io.emit('user:disconnect', socket.id);
     });
 });
 
