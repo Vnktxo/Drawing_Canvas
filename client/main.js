@@ -1,13 +1,9 @@
 window.addEventListener("load",() => {
     const socket = io();
-    socket.on('connect', () => {
-        console.log('Connected to server with ID:' + socket.id);
-        socket.emit('requestFullCanvas');
-    });
     
     const canvas = document.getElementById("drawing-canvas");
     const context = canvas.getContext("2d");
-
+    
     const toolbar = document.querySelector(".toolbar");
     const colorPicker = document.getElementById("color-picker");
     const strokeWidth = document.getElementById("stroke-width");
@@ -15,7 +11,9 @@ window.addEventListener("load",() => {
     const eraser = document.getElementById("eraser");
     const clearButton = document.getElementById("clear-button");
     const undoButton = document.getElementById("undo-button");
-
+    const redoButton = document.getElementById("redo-button");
+    const userList = document.getElementById("user-list");
+    
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight - toolbar.offsetHeight;
     
@@ -23,12 +21,19 @@ window.addEventListener("load",() => {
     context.lineJoin = "round";
     context.strokeStyle = colorPicker.value;
     context.lineWidth = strokeWidth.value;
-
-
+    
+    
     let drawing = false;
     let currentTool = "brush";
     let currentPath = [];
     let history = [];
+    
+    const userCursors = new Map();
+    
+    socket.on('connect', () => {
+        console.log('Connected to server with ID:' + socket.id);
+        socket.emit('requestFullCanvas');
+    });
 
     socket.on('draw:operation', (op) => {
         history.push(op);
@@ -36,13 +41,54 @@ window.addEventListener("load",() => {
     });
 
     const loadHistory = (serverHistory) => {
-        console.log(`Loadig history with ${serverHistory.length} ops`);
-        histoy = serverHistory;
+        console.log(`Loading history with ${serverHistory.length} ops`);
+        history = serverHistory;
         redrawCanvas();
     };
-
+    
     socket.on('fullCanvas', loadHistory);
     socket.on('opStore:load', loadHistory);
+    
+    socket.on('cursor:move', (data) => {
+        let cursorDiv = userCursors.get(data.socketId);
+
+        if(!cursorDiv){
+            cursorDiv = document.createElement('div');
+            cursorDiv.className = 'cursor';
+            const hash = data.socketId.split('').reduce((acc,char) => char.charCodeAt(0) + ((acc << 5) - acc), 0);
+            const color = `hsl(${hash % 360}, 100%, 50%)`;
+            cursorDiv.style.backgroundColor = color;
+            document.body.appendChild(cursorDiv);
+            userCursors.set(data.socketId, cursorDiv);
+        }
+
+        const x = data.x;
+        const y = data.y + toolbar.offsetHeight;
+
+        cursorDiv.style.left = x + 'px';
+        cursorDiv.style.top = y + 'px';
+    });
+
+    socket.on('user:update', (users) => {
+        userList.innerHTML = '';
+        for(const id in users){
+            const userEl = document.createElement('li');
+            userEl.innerText = `User: ${id.substring(0, 5)}`;
+            if(id == socket.id){
+                userEl.innerText += ' (You) ';
+            }
+            userList.appendChild(userEl);
+        }
+    });
+
+    socket.on('user:disconnect', (socketId) => {
+        const cursorDiv = userCursors.get(socketId);
+        if(cursorDiv){
+            cursorDiv.remove();
+            userCursors.delete(socketId);
+        }
+    });
+
 
     /** @param {object} op */
     
@@ -52,6 +98,9 @@ window.addEventListener("load",() => {
         const ogStroke = context.strokeStyle;
         const ogWidth = context.lineWidth;
         const ogOps = context.globalCompositeOperation;
+        context.strokeStyle = op.color;
+        context.lineWidth = op.lineWidth;
+        context.globalCompositeOperation = (op.tool === "eraser") ? "destination-out" : "source-over";
 
         context.beginPath();
         context.moveTo(op.path[0].x, op.path[0].y);
@@ -84,7 +133,7 @@ window.addEventListener("load",() => {
         context.beginPath();
         context.moveTo(e.offsetX, e.offsetY);
 
-        currentPath = [{x : offsetX, y : offsetY}];
+        currentPath = [{x : e.offsetX, y : e.offsetY}];
     }
 
     function draw(e){
@@ -92,7 +141,7 @@ window.addEventListener("load",() => {
         context.lineTo(e.offsetX, e.offsetY);
         context.stroke();
 
-        currentPath.push({x : offsetX, y : offsetY});
+        currentPath.push({x : e.offsetX, y : e.offsetY});
     }
 
     function stopdrawing(){
@@ -115,6 +164,13 @@ window.addEventListener("load",() => {
     canvas.addEventListener("mousemove", draw);
     canvas.addEventListener("mouseup", stopdrawing);
     canvas.addEventListener("mouseout", stopdrawing);
+
+    canvas.addEventListener("mousemove", (e) => {
+        socket.emit('cursor:move', {
+            x: e.offsetX,
+            y: e.offsetY
+        });
+    });
 
     colorPicker.addEventListener("change", (e) =>{
         context.strokeStyle = e.target.value;
@@ -147,6 +203,11 @@ window.addEventListener("load",() => {
         socket.emit('opStore:undo');
     });
 
+    redoButton.addEventListener("click", () => {
+        console.log('Requesting server to redo');
+        socket.emit('opStore:redo');
+    })
+
     window.addEventListener("resize", () => {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight - toolbar.offsetHeight;
@@ -157,7 +218,7 @@ window.addEventListener("load",() => {
         context.lineJoin = "round";
         context.strokeStyle = colorPicker.value;
         context.lineWidth = strokeWidth.value;
-        context.globalCompositeOperation = (currentTool === "eraser") ? "source-over" : "destination-out";
+        context.globalCompositeOperation = (currentTool === "eraser") ? "destination-out" : "source-over";
     });
 
 });
